@@ -1,9 +1,15 @@
+import duckdb
 import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 DATA_URL = st.secrets["gsheets"]["url"]
+
+if "duck_conn" not in st.session_state:
+    st.session_state["duck_conn"] = duckdb.connect(":memory:")
+
+conn = st.session_state["duck_conn"]
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
@@ -16,14 +22,8 @@ def fetch_data():
     df = conn.read(spreadsheet=DATA_URL)
 
     FINANCIAL_COLS = [
-    "Gross Sales ($)",
-    "PhotoDay Fee ($)",
-    "Processing Fee ($)",
-    "Product Costs ($)",
-    "Lab Shipping Costs ($)",
-    "Sales Tax Total ($)",
-    "Taxable Amount ($)",
-    "Studio Payouts ($)",
+    "Amount",
+    "Used Credits",
     ]
 
     NUMERIC_COLS = df.select_dtypes(include=np.number).columns.tolist()
@@ -40,7 +40,50 @@ def fetch_data():
 
     return df
 
-data = fetch_data()
 
-st.dataframe(data)
-st.bar_chart(data, x="MonthYear", y="Gross Sales ($)")
+def load_data():
+    df = fetch_data()
+    return conn.execute("CREATE TABLE IF NOT EXISTS transactions AS SELECT * FROM df")
+
+
+def main():
+    load_data()
+
+    transactions_monthly_agg = conn.execute('''
+        SELECT 
+            "Purchase Date", 
+            SUM("Amount") as "Amount",
+            SUM("Used Credits") as "Used Credits"
+        FROM transactions
+        GROUP BY 
+            "Purchase Date"
+        ORDER BY 
+            "Purchase Date" DESC
+    ''').fetchdf()
+
+    month_dropdown_select = conn.execute('''
+        SELECT DISTINCT 
+            "Purchase Date" 
+        FROM transactions 
+        ORDER BY 
+            "Purchase Date"
+    ''').fetchdf()
+
+    st.header('MammaWarrior Analytics 📈')
+
+    st.write("Monthly Gross Sales")
+    st.line_chart(
+        data=transactions_monthly_agg,
+        x="Purchase Date", 
+        y="Amount",
+        color=[75, 83, 32],
+    )
+
+    st.write("Daily PhotoDay Breakdown")
+    st.dataframe(transactions_monthly_agg)
+
+    
+
+
+if __name__ == "__main__":
+    main()
